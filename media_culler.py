@@ -98,9 +98,10 @@ class MediaCuller(QMainWindow):
         self.counter = QLabel(self)
         self.counter.setStyleSheet(
             "color: #0f0; background: rgba(0,0,0,200); "
-            "padding: 6px 14px; font-size: 20px; font-weight: bold; "
-            "font-family: monospace; border-radius: 6px;"
+            "padding: 6px 14px; font-size: 20px; "
+            "font-family: monospace; border-radius: 20px;"
         )
+        #self.counter.adjustSize()
         self.counter.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.counter.move(16, 16)
 
@@ -157,6 +158,7 @@ class MediaCuller(QMainWindow):
 
         # Update counter
         self.counter.setText(f" {self.current_index + 1} / {len(self.media_list)} ")
+        self.counter.adjustSize()
         self.counter.raise_()
 
         path = self.media_list[self.current_index]
