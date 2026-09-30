@@ -3,11 +3,10 @@ import os
 import sqlite3
 from pathlib import Path
 
-# --- Qt6 Corrected Imports ---
 from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, 
                                QVBoxLayout, QWidget, QStackedWidget, QFileDialog)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget  # Moved in Qt6
+from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap, QImage, QKeyEvent
 from PIL import Image
@@ -50,28 +49,24 @@ class MediaCuller(QMainWindow):
         self.setWindowTitle("Media Culler - Minimal Viewer")
         self.resize(1280, 720)
         
-        # DB & State
         self.db = MediaDB()
         self.root_path = root_path
         self.media_list = self.scan_media()
         self.current_index = 0
-        self.rate_index = 1  # Starts at 1.0x
+        self.rate_index = 1  
         
         if not self.media_list:
             print("No new unviewed media found. Exiting.")
             sys.exit(0)
 
-        # GUI Setup
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         
-        # Page 0: Image Viewer
         self.img_label = QLabel()
         self.img_label.setAlignment(Qt.AlignCenter)
         self.img_label.setStyleSheet("background-color: black;")
         self.stack.addWidget(self.img_label)
         
-        # Page 1: Video Viewer
         self.video_widget = QVideoWidget()
         self.video_widget.setStyleSheet("background-color: black;")
         self.stack.addWidget(self.video_widget)
@@ -81,8 +76,15 @@ class MediaCuller(QMainWindow):
         self.player.setAudioOutput(self.audio_output)
         self.player.setVideoOutput(self.video_widget)
         
+        # --- ADDED: Error logging for video playback ---
+        self.player.errorOccurred.connect(self.on_media_error)
+        
         self.showFullScreen()
         self.load_current_media()
+
+    def on_media_error(self, error):
+        # This will print the exact GStreamer/Qt error to the terminal if video fails
+        print(f"!!! MEDIA PLAYER ERROR: {self.player.errorString()} !!!")
 
     def scan_media(self):
         viewed = self.db.get_viewed_paths()
@@ -123,7 +125,6 @@ class MediaCuller(QMainWindow):
             w, h = self.width(), self.height()
             img.thumbnail((w, h), Image.Resampling.LANCZOS)
             
-            # Safely convert to QImage with correct bytes-per-line
             if img.mode == "RGB":
                 fmt = QImage.Format_RGB888
                 bytes_per_line = 3 * img.width
@@ -139,7 +140,7 @@ class MediaCuller(QMainWindow):
             self.img_label.setText(f"Error loading image")
 
     def load_video(self, path):
-        # Qt6 uses setSource instead of setMedia
+        print(f"Attempting to play video: {path}")
         self.player.setSource(QUrl.fromLocalFile(path))
         self.player.setPlaybackRate(PLAYBACK_RATES[self.rate_index])
         self.player.play()
@@ -172,7 +173,7 @@ class MediaCuller(QMainWindow):
             else:
                 self.mark_and_navigate(-1)
                 
-        elif key == Qt.Key_Exclam: # '!' (Shift + 1)
+        elif key == Qt.Key_Exclam: 
             self.db.mark_favorite(current_path)
             print(f"Marked as Favorite: {current_path}")
             self.mark_and_navigate(1)
