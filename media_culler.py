@@ -9,6 +9,13 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap, QImage, QKeyEvent
+
+# Try to register JXL plugin for Pillow
+try:
+    import pillow_jxl
+except ImportError:
+    pass
+
 from PIL import Image
 
 # --- Configuration ---
@@ -59,14 +66,17 @@ class MediaCuller(QMainWindow):
             print("No new unviewed media found. Exiting.")
             sys.exit(0)
 
+        # GUI Setup
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         
+        # Page 0: Image Viewer
         self.img_label = QLabel()
         self.img_label.setAlignment(Qt.AlignCenter)
-        self.img_label.setStyleSheet("background-color: black;")
+        self.img_label.setStyleSheet("background-color: black; color: white; font-size: 18px;")
         self.stack.addWidget(self.img_label)
         
+        # Page 1: Video Viewer
         self.video_widget = QVideoWidget()
         self.video_widget.setStyleSheet("background-color: black;")
         self.stack.addWidget(self.video_widget)
@@ -76,14 +86,17 @@ class MediaCuller(QMainWindow):
         self.player.setAudioOutput(self.audio_output)
         self.player.setVideoOutput(self.video_widget)
         
-        # --- ADDED: Error logging for video playback ---
         self.player.errorOccurred.connect(self.on_media_error)
+        
+        # --- NEW: Floating Counter Label ---
+        self.counter_label = QLabel(self)
+        self.counter_label.setStyleSheet("color: white; background-color: rgba(0, 0, 0, 180); padding: 8px; font-size: 18px; font-weight: bold; border-radius: 4px;")
+        self.counter_label.move(20, 20)
         
         self.showFullScreen()
         self.load_current_media()
 
     def on_media_error(self, error):
-        # This will print the exact GStreamer/Qt error to the terminal if video fails
         print(f"!!! MEDIA PLAYER ERROR: {self.player.errorString()} !!!")
 
     def scan_media(self):
@@ -104,6 +117,11 @@ class MediaCuller(QMainWindow):
             self.close()
             return
 
+        # --- NEW: Update Counter Logic ---
+        # Shows "Current Index / Total" (e.g., 3 / 15)
+        self.counter_label.setText(f"{self.current_index + 1} / {len(self.media_list)}")
+        self.counter_label.raise_() # Ensure it stays on top of video/images
+
         path = self.media_list[self.current_index]
         ext = Path(path).suffix.lower()
         
@@ -118,10 +136,24 @@ class MediaCuller(QMainWindow):
 
     def load_image(self, path):
         try:
-            img = Image.open(path)
-            if img.mode not in ("RGB", "L"):
-                img = img.convert("RGB")
-            
+            img = None
+            # Try PIL first
+            try:
+                img = Image.open(path)
+                if img.mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+            except Exception:
+                # Fallback for JXL if PIL fails
+                if path.lower().endswith('.jxl'):
+                    try:
+                        import imageio.v3 as iio
+                        img_array = iio.imread(path)
+                        img = Image.fromarray(img_array)
+                    except Exception as e2:
+                        raise Exception(f"PIL and imageio failed. Run: pip install imageio")
+                else:
+                    raise
+
             w, h = self.width(), self.height()
             img.thumbnail((w, h), Image.Resampling.LANCZOS)
             
@@ -137,7 +169,7 @@ class MediaCuller(QMainWindow):
             self.img_label.setPixmap(pixmap)
         except Exception as e:
             print(f"Error loading image {path}: {e}")
-            self.img_label.setText(f"Error loading image")
+            self.img_label.setText(f"Error loading image:\n{e}")
 
     def load_video(self, path):
         print(f"Attempting to play video: {path}")
@@ -150,6 +182,7 @@ class MediaCuller(QMainWindow):
         self.db.mark_viewed(current_path)
         
         self.current_index += direction
+        # Clamp index between 0 and max length
         self.current_index = max(0, min(self.current_index, len(self.media_list)))
         self.load_current_media()
 
@@ -171,6 +204,7 @@ class MediaCuller(QMainWindow):
             if is_shift and is_video:
                 self.player.setPosition(max(0, self.player.position() - 10000))
             else:
+                # Going back still marks it as viewed per your rules
                 self.mark_and_navigate(-1)
                 
         elif key == Qt.Key_Exclam: 
