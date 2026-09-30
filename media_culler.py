@@ -2,9 +2,12 @@ import sys
 import os
 import sqlite3
 from pathlib import Path
-from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, QVideoWidget, 
+
+# --- Qt6 Corrected Imports ---
+from PySide6.QtWidgets import (QApplication, QMainWindow, QLabel, 
                                QVBoxLayout, QWidget, QStackedWidget, QFileDialog)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget  # Moved in Qt6
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QPixmap, QImage, QKeyEvent
 from PIL import Image
@@ -26,7 +29,7 @@ class MediaDB:
 
     def get_viewed_paths(self):
         self.c.execute("SELECT path FROM media WHERE viewed = 1")
-        return set(row[0] for row in self.fetchall())
+        return set(row[0] for row in self.c.fetchall())
 
     def mark_viewed(self, path):
         self.c.execute("INSERT INTO media (path, viewed) VALUES (?, 1) "
@@ -84,14 +87,13 @@ class MediaCuller(QMainWindow):
     def scan_media(self):
         viewed = self.db.get_viewed_paths()
         files = []
-        # os.walk naturally includes hidden files and directories
         for root, dirs, filenames in os.walk(self.root_path):
             for f in filenames:
                 if f.lower().endswith(tuple(ALL_EXTS)):
                     full_path = os.path.join(root, f)
                     if full_path not in viewed:
                         files.append(full_path)
-        files.sort() # Sort alphabetically for predictable order
+        files.sort()
         return files
 
     def load_current_media(self):
@@ -103,7 +105,6 @@ class MediaCuller(QMainWindow):
         path = self.media_list[self.current_index]
         ext = Path(path).suffix.lower()
         
-        # Stop any playing video
         self.player.stop()
 
         if ext in IMAGE_EXTS:
@@ -115,18 +116,22 @@ class MediaCuller(QMainWindow):
 
     def load_image(self, path):
         try:
-            # Use Pillow for maximum format compatibility (JXL, TGA, etc.)
             img = Image.open(path)
-            # Convert to RGB if necessary (e.g., for RGBA or P modes)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             
-            # Resize to fit window while keeping aspect ratio to save RAM
             w, h = self.width(), self.height()
             img.thumbnail((w, h), Image.Resampling.LANCZOS)
             
-            # Convert to QPixmap
-            q_img = QImage(img.tobytes(), img.width, img.height, QImage.Format_RGB888)
+            # Safely convert to QImage with correct bytes-per-line
+            if img.mode == "RGB":
+                fmt = QImage.Format_RGB888
+                bytes_per_line = 3 * img.width
+            else:
+                fmt = QImage.Format_Grayscale8
+                bytes_per_line = img.width
+                
+            q_img = QImage(img.tobytes(), img.width, img.height, bytes_per_line, fmt)
             pixmap = QPixmap.fromImage(q_img)
             self.img_label.setPixmap(pixmap)
         except Exception as e:
@@ -134,12 +139,12 @@ class MediaCuller(QMainWindow):
             self.img_label.setText(f"Error loading image")
 
     def load_video(self, path):
-        self.player.setMedia(QUrl.fromLocalFile(path))
+        # Qt6 uses setSource instead of setMedia
+        self.player.setSource(QUrl.fromLocalFile(path))
         self.player.setPlaybackRate(PLAYBACK_RATES[self.rate_index])
         self.player.play()
 
     def mark_and_navigate(self, direction):
-        # Mark current as viewed before leaving
         current_path = self.media_list[self.current_index]
         self.db.mark_viewed(current_path)
         
@@ -157,14 +162,12 @@ class MediaCuller(QMainWindow):
 
         if key == Qt.Key_Right:
             if is_shift and is_video:
-                # Shift + -> : Forward 10s
                 self.player.setPosition(self.player.position() + 10000)
             else:
                 self.mark_and_navigate(1)
                 
         elif key == Qt.Key_Left:
             if is_shift and is_video:
-                # Shift + <- : Backward 10s
                 self.player.setPosition(max(0, self.player.position() - 10000))
             else:
                 self.mark_and_navigate(-1)
@@ -172,7 +175,6 @@ class MediaCuller(QMainWindow):
         elif key == Qt.Key_Exclam: # '!' (Shift + 1)
             self.db.mark_favorite(current_path)
             print(f"Marked as Favorite: {current_path}")
-            # Auto-advance after favoriting
             self.mark_and_navigate(1)
             
         elif key == Qt.Key_X:
@@ -188,7 +190,7 @@ class MediaCuller(QMainWindow):
                 print(f"Speed: {PLAYBACK_RATES[self.rate_index]}x")
                 
         elif key == Qt.Key_Escape:
-            self.mark_and_navigate(0) # Mark current as viewed
+            self.mark_and_navigate(0) 
             self.close()
         else:
             super().keyPressEvent(event)
@@ -201,7 +203,6 @@ class MediaCuller(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # Get root path from arguments or prompt user
     if len(sys.argv) > 1:
         root_path = sys.argv[1]
     else:
